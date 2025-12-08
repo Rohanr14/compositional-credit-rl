@@ -76,54 +76,54 @@ class CreditDecomposer(nn.Module):
         return credit_scores, attention_weights
 
 
-def store_success_pattern(self, trajectory_features: torch.Tensor, primitive_sequence: List[int]):
-    """Store successful trajectory pattern in compositional memory"""
-    # Average trajectory features as pattern key
-    pattern_key = trajectory_features.mean(dim=1)  # (batch, feature_dim)
+    def store_success_pattern(self, trajectory_features: torch.Tensor, primitive_sequence: List[int]):
+        """Store successful trajectory pattern in compositional memory"""
+        # Average trajectory features as pattern key
+        pattern_key = trajectory_features.mean(dim=1)  # (batch, feature_dim)
 
-    # Primitive composition as pattern value
-    primitive_embeds = self.primitive_embeddings(
-        torch.tensor(primitive_sequence, device=trajectory_features.device)
-    )
-    pattern_value = primitive_embeds.mean(dim=0)  # (feature_dim,)
+        # Primitive composition as pattern value
+        primitive_embeds = self.primitive_embeddings(
+            torch.tensor(primitive_sequence, device=trajectory_features.device)
+        )
+        pattern_value = primitive_embeds.mean(dim=0)  # (feature_dim,)
 
-    # Store in memory (circular buffer)
-    for i in range(pattern_key.size(0)):
-        ptr = int(self.credit_memory_ptr.item())
-        self.credit_memory_keys[ptr] = pattern_key[i]
-        self.credit_memory_values[ptr] = pattern_value
-        self.credit_memory_ptr[0] = (ptr + 1) % self.memory_size
+        # Store in memory (circular buffer)
+        for i in range(pattern_key.size(0)):
+            ptr = int(self.credit_memory_ptr.item())
+            self.credit_memory_keys[ptr] = pattern_key[i]
+            self.credit_memory_values[ptr] = pattern_value
+            self.credit_memory_ptr[0] = (ptr + 1) % self.memory_size
 
 
-def retrieve_similar_patterns(self, query_features: torch.Tensor, k: int = 5) -> torch.Tensor:
-    """Retrieve similar successful patterns from memory"""
-    # Compute similarity with stored patterns
-    query = query_features.mean(dim=1) if query_features.dim() == 3 else query_features
+    def retrieve_similar_patterns(self, query_features: torch.Tensor, k: int = 5) -> torch.Tensor:
+        """Retrieve similar successful patterns from memory"""
+        # Compute similarity with stored patterns
+        query = query_features.mean(dim=1) if query_features.dim() == 3 else query_features
 
-    # Check if memory has any entries
-    memory_ptr = int(self.credit_memory_ptr.item())
-    if memory_ptr == 0:
-        # No patterns stored yet, return zero tensor
-        return torch.zeros_like(query)
+        # Check if memory has any entries
+        memory_ptr = int(self.credit_memory_ptr.item())
+        if memory_ptr == 0:
+            # No patterns stored yet, return zero tensor
+            return torch.zeros_like(query)
 
-    # Only use filled memory slots
-    filled_keys = self.credit_memory_keys[:memory_ptr]
-    filled_values = self.credit_memory_values[:memory_ptr]
+        # Only use filled memory slots
+        filled_keys = self.credit_memory_keys[:memory_ptr]
+        filled_values = self.credit_memory_values[:memory_ptr]
 
-    similarities = F.cosine_similarity(
-        query.unsqueeze(1),  # (batch, 1, feature_dim)
-        filled_keys.unsqueeze(0),  # (1, filled_size, feature_dim)
-        dim=-1
-    )  # (batch, filled_size)
+        similarities = F.cosine_similarity(
+            query.unsqueeze(1),  # (batch, 1, feature_dim)
+            filled_keys.unsqueeze(0),  # (1, filled_size, feature_dim)
+            dim=-1
+        )  # (batch, filled_size)
 
-    # Get top-k (limited by available patterns)
-    k_actual = min(k, memory_ptr)
-    top_k_indices = torch.topk(similarities, k_actual, dim=-1).indices
+        # Get top-k (limited by available patterns)
+        k_actual = min(k, memory_ptr)
+        top_k_indices = torch.topk(similarities, k_actual, dim=-1).indices
 
-    # Retrieve values
-    retrieved = filled_values[top_k_indices]  # (batch, k, feature_dim)
+        # Retrieve values
+        retrieved = filled_values[top_k_indices]  # (batch, k, feature_dim)
 
-    return retrieved.mean(dim=1)  # (batch, feature_dim)
+        return retrieved.mean(dim=1)  # (batch, feature_dim)
 
 
 class HindsightCreditAssignment(nn.Module):

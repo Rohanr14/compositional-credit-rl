@@ -89,10 +89,7 @@ class CCAAgent(BaseAgent):
 
                 # Bias action distribution toward successful patterns
                 # (This is a key innovation: transfer from compositional memory)
-                pattern_bias = torch.matmul(
-                    similar_patterns.unsqueeze(1),
-                    self.policy.actor[2].weight.t()
-                ).squeeze(1) * 0.3  # Scaling factor
+                pattern_bias = self.policy.actor(similar_patterns) * 0.3 # Scaling factor
 
                 action_logits = action_logits + pattern_bias
 
