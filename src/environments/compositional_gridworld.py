@@ -193,9 +193,8 @@ class CompositionalGridWorld(gym.Env):
         return False
 
     def _get_target_color(self, primitive_idx: int) -> str:
-        """Get target color for current primitive"""
-        # Simple mapping: use color based on primitive index
-        return self.COLORS[primitive_idx % len(self.COLORS)]
+        """Get target color for current primitive - all target same object"""
+        return self.COLORS[0]  # All primitives target red for coherent task chaining
 
     def _random_free_pos(self) -> tuple[signedinteger[_64Bit], signedinteger[_64Bit]]:
         """Get random unoccupied position"""

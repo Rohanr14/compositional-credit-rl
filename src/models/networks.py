@@ -3,99 +3,69 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class ConvEncoder(nn.Module):
-    """Convolutional encoder for grid observations"""
+class CompositionalNetwork(nn.Module):
+    """Shared architecture for PPO and CCA"""
 
-    def __init__(self, input_channels: int = 7, hidden_dim: int = 128):
+    def __init__(self, input_shape, vocab_size=10, embed_dim=32, hidden_dim=128):
         super().__init__()
 
-        self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
+        # 1. Image Encoder (Minigrid is 7x7x3 usually)
+        c, h, w = input_shape
+        self.image_encoder = nn.Sequential(
+            nn.Conv2d(c, 16, kernel_size=2, stride=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=2, stride=1),
+            nn.ReLU(),
+            nn.Flatten()
+        )
 
-        self.fc = nn.Linear(64 * 15 * 15, hidden_dim)
+        # Calculate conv output size
+        with torch.no_grad():
+            dummy = torch.zeros(1, c, h, w)
+            conv_out = self.image_encoder(dummy).shape[1]
 
-    def forward(self, x):
-        # x shape: (batch, 7, 15, 15)
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
+        # 2. Instruction Encoder (The Fix!)
+        self.word_embedding = nn.Embedding(vocab_size, embed_dim)
+        self.instr_rnn = nn.GRU(embed_dim, embed_dim, batch_first=True)
 
-        x = x.view(x.size(0), -1)  # Flatten
-        x = F.relu(self.fc(x))
+        # 3. Fusion
+        self.fusion = nn.Linear(conv_out + embed_dim, hidden_dim)
 
+    def forward(self, image, mission_tokens):
+        # Process Image
+        img_feat = self.image_encoder(image)
+
+        # Process Instruction
+        # mission_tokens: (Batch, Seq_Len)
+        embeds = self.word_embedding(mission_tokens.long())
+        _, rnn_out = self.instr_rnn(embeds)
+        instr_feat = rnn_out.squeeze(0)
+
+        # Fuse
+        combined = torch.cat([img_feat, instr_feat], dim=1)
+        x = F.relu(self.fusion(combined))
         return x
 
 
 class ActorCritic(nn.Module):
-    """Actor-Critic network for PPO"""
-
-    def __init__(self, input_channels: int = 7, action_dim: int = 5, hidden_dim: int = 128):
+    def __init__(self, obs_shape, action_dim):
         super().__init__()
+        self.encoder = CompositionalNetwork(obs_shape)
 
-        self.encoder = ConvEncoder(input_channels, hidden_dim)
+        self.actor = nn.Linear(128, action_dim)
+        self.critic = nn.Linear(128, 1)
 
-        # Actor head
-        self.actor = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, action_dim)
-        )
+    def forward(self, image, mission):
+        x = self.encoder(image, mission)
+        return self.actor(x), self.critic(x)
 
-        # Critic head
-        self.critic = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
-        )
-
-    def forward(self, x):
-        features = self.encoder(x)
-        action_logits = self.actor(features)
-        value = self.critic(features)
-        return action_logits, value
-
-    def get_action(self, x, deterministic=False):
-        """Sample action from policy"""
-        action_logits, value = self.forward(x)
+    def get_action(self, image, mission, deterministic=False):
+        logits, val = self.forward(image, mission)
+        probs = F.softmax(logits, dim=-1)
 
         if deterministic:
-            action = torch.argmax(action_logits, dim=-1)
+            action = torch.argmax(probs, dim=-1)
         else:
-            probs = F.softmax(action_logits, dim=-1)
             action = torch.multinomial(probs, 1).squeeze(-1)
 
-        return action, value
-
-    def evaluate_actions(self, x, actions):
-        """Evaluate actions for PPO update"""
-        action_logits, value = self.forward(x)
-
-        log_probs = F.log_softmax(action_logits, dim=-1)
-        action_log_probs = log_probs.gather(1, actions.unsqueeze(-1)).squeeze(-1)
-
-        # Entropy for exploration
-        probs = F.softmax(action_logits, dim=-1)
-        entropy = -(probs * log_probs).sum(dim=-1)
-
-        return action_log_probs, value.squeeze(-1), entropy
-
-
-class DQN(nn.Module):
-    """Deep Q-Network"""
-
-    def __init__(self, input_channels: int = 7, action_dim: int = 5, hidden_dim: int = 128):
-        super().__init__()
-
-        self.encoder = ConvEncoder(input_channels, hidden_dim)
-
-        self.q_head = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, action_dim)
-        )
-
-    def forward(self, x):
-        features = self.encoder(x)
-        q_values = self.q_head(features)
-        return q_values
+        return action, val
