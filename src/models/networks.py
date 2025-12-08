@@ -69,3 +69,15 @@ class ActorCritic(nn.Module):
             action = torch.multinomial(probs, 1).squeeze(-1)
 
         return action, val
+
+class DQN(nn.Module):
+    def __init__(self, input_shape, action_dim, vocab_size=20):
+        super().__init__()
+        # Re-use the shared CompositionalNetwork encoder
+        self.encoder = CompositionalNetwork(input_shape, vocab_size=vocab_size)
+        # Q-value head (output one value per action)
+        self.q_head = nn.Linear(128, action_dim)
+
+    def forward(self, image, mission):
+        x = self.encoder(image, mission)
+        return self.q_head(x)
